@@ -16,7 +16,11 @@ var NAME = "Keyboard Cleaner"
 var ICON = "󰌓"            // nf-md-keyboard, the same glyph the Omalaunch extension uses
 var COLOR = "#7aa2f7"
 var MIN_SECONDS = 1
-var MAX_SECONDS = 60 * 60          // one hour, matches bin/keyboard-cleaner.py
+var MAX_SECONDS = 5 * 60            // 5 minutes, hard cap so an accidental "lock 1h"
+// does not strand the user without input for an hour. The Python helper
+// keeps its own 60-minute guard, but the UI never offers anything past 5
+// minutes — long enough to clean a keyboard, short enough that a slip
+// does not lock someone out of their session.
 
 // -------------------------------------------------------------------------
 // patterns
@@ -29,7 +33,7 @@ var MAX_SECONDS = 60 * 60          // one hour, matches bin/keyboard-cleaner.py
 // All regexes are anchored at the start so they don't match inside an
 // unrelated query like "settings". Flags limited to "i".
 
-var VERB = "(wipe|wash|clean|cleaning|block|lock|disable|disable keyboard|disable input|kill input|free keys)"
+var VERB = "(wipe|wash|clean|block)"
 
 var PATTERNS = [
   { id: "duration-suffix", regex: "^\\s*" + VERB + "\\b\\s*\\d+\\s*s(ec(ond)?s?)?\\b", flags: "i", boost: 18,
@@ -38,11 +42,17 @@ var PATTERNS = [
     example: "block 5m", description: "Block input for N minutes" },
   { id: "duration-hour", regex: "^\\s*" + VERB + "\\b\\s*\\d+\\s*h(our)?s?\\b", flags: "i", boost: 18,
     example: "block 1h", description: "Block input for N hours" },
-  { id: "duration-bare-seconds", regex: "^\\s*\\d+\\s*s(ec(ond)?s?)?\\b", flags: "i", boost: 8,
+  // Bare-duration patterns carry a low boost on purpose. They overlap
+  // visually with the bundled Timer extension (which uses the same
+  // shapes: `5m`, `1h`), so we let Timer keep the high tier and only
+  // surface our row when Timer is disabled or returns nothing for the
+  // query. The verb-shaped variants above stay at 18 because they do
+  // not overlap with Timer.
+  { id: "duration-bare-seconds", regex: "^\\s*\\d+\\s*s(ec(ond)?s?)?\\b", flags: "i", boost: 4,
     example: "30s", description: "N seconds, no verb" },
-  { id: "duration-bare-minutes", regex: "^\\s*\\d+\\s*m(in(ute)?s?)?\\b", flags: "i", boost: 8,
+  { id: "duration-bare-minutes", regex: "^\\s*\\d+\\s*m(in(ute)?s?)?\\b", flags: "i", boost: 4,
     example: "5m", description: "N minutes, no verb" },
-  { id: "duration-bare-hours", regex: "^\\s*\\d+\\s*h(our)?s?\\b", flags: "i", boost: 8,
+  { id: "duration-bare-hours", regex: "^\\s*\\d+\\s*h(our)?s?\\b", flags: "i", boost: 4,
     example: "1h", description: "N hours, no verb" },
   { id: "verb-only", regex: "^\\s*" + VERB + "\\b", flags: "i", boost: 6,
     example: "wipe", description: "A verb without a duration falls back to the default length" }
@@ -161,7 +171,7 @@ function blockArgv(command, parsed) {
 function blockRow(parsed, state) {
   var title = "Block input for " + describeDuration(parsed.seconds)
   var subtitle = parsed.label ? "Label: " + parsed.label : "Wipe the keyboard, then unlock"
-  return {
+  var row = {
     id: "block",
     title: title,
     subtitle: subtitle,
@@ -179,6 +189,16 @@ function blockRow(parsed, state) {
     action: { type: "block", seconds: parsed.seconds, label: parsed.label, verb: parsed.verb },
     altAction: { type: "navigate", scope: state.key, title: NAME }
   }
+  // Anything past a minute is a long block: the user can no longer reach
+  // the palette to cancel, so ask first. The host renders the confirm
+  // dialog with the row's `confirm` text and the Enter key as the default
+  // action ("Block input for 1 minute?" / Enter => confirm => wipe).
+  if (parsed.seconds > 60) {
+    row.confirm = "Block input for " + describeDuration(parsed.seconds)
+      + "? The keyboard will be blocked for that long — you cannot " +
+      "cancel from the palette during the window."
+  }
+  return row
 }
 
 // The root navigation row (no query). Lives at the palette root so

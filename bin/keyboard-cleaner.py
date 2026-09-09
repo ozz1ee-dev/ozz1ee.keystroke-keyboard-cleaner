@@ -336,7 +336,12 @@ def notify(*, replaces=None, urgency="low", headline="Keyboard Cleaner",
     `replaces=` so Quickshell refreshes the same pop-up instead of stacking new
     ones. Every failure (missing wrapper, bus down, daemon hung) is swallowed —
     a glitchy notification channel must never delay the keyboard release.
+    Set KEYBOARD_CLEANER_NO_NOTIFY=1 in the environment to suppress all
+    notifications (used by the Keystroke companion plugin where the palette
+    view is the primary feedback channel).
     """
+    if os.environ.get("KEYBOARD_CLEANER_NO_NOTIFY"):
+        return None
     if not OMARCHY_NOTIFY_AVAILABLE:
         return None
     argv = [str(OMARCHY_NOTIFY), "-u", urgency]
@@ -498,19 +503,31 @@ def main(argv: list[str]) -> int:
 
     deadline = time.monotonic() + duration
     try:
+        last_notified_second = -1
         while not interrupted:
             remaining = int(round(deadline - time.monotonic()))
             if remaining <= 0:
                 break
             print(f"\r  Releasing in {remaining:3d} second(s)... ", end="", flush=True)
-            if notif_id:
+            # Throttle the desktop notification to once per whole second.
+            # The previous loop called `notify()` four times a second, which
+            # spawned `omarchy-notification-send` four times a second and
+            # spammed the bus daemon; refreshing once a second is enough
+            # and matches what the README claims.
+            if notif_id and remaining != last_notified_second:
+                last_notified_second = remaining
                 notify(
                     replaces=notif_id,
                     urgency="low",
                     glyph=KEYBOARD_GLYPH,
                     body=f"Cleaning keyboard — releasing in {remaining}s.",
                 )
-            time.sleep(min(0.25, max(deadline - time.monotonic(), 0)))
+            # Stay responsive to signals and to the user's other keystrokes
+            # (the helper still owns the keyboard grab for the whole block,
+            # but the palette and other input paths can still run), but do
+            # not waste CPU. A 200 ms tick is short enough to feel snappy and
+            # long enough that we never burn a whole core.
+            time.sleep(min(0.2, max(deadline - time.monotonic(), 0)))
     except KeyboardInterrupt:
         pass
     finally:

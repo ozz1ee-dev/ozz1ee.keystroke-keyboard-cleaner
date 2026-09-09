@@ -1,5 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import QtQuick.Shapes
 import Quickshell
 import qs.Commons
 import qs.Ui as Ui
@@ -13,12 +14,12 @@ import "core/Parser.js" as Parser
 // and the shell's theme tokens, so every Omarchy theme styles it
 // without knowing it.
 //
-//   Enter          close the palette (the helper releases on its own)
-//   Esc / Backspace close the palette and return to the results
+//   Esc / Backspace  close the palette (the helper releases on its own)
 Item {
   id: root
   property var host: null
   property var service: null
+  property string windowLabel: ""
 
   readonly property color foreground: root.host ? root.host.foreground : "white"
   readonly property color muted: root.host ? root.host.muted : "#aaa"
@@ -30,30 +31,78 @@ Item {
   readonly property int fontLabel: root.host && root.host.fontLabel ? root.host.fontLabel : Style.font.bodySmall
   readonly property int fontCaption: root.host && root.host.fontCaption ? root.host.fontCaption : Style.font.caption
 
-  readonly property int remaining: service ? service.remainingSeconds() : 0
-  readonly property bool done: remaining <= 0
+  // ── local countdown ────────────────────────────────────────────
+  // Snapshot the service's total seconds when the view opens and tick
+  // down locally every second.  This avoids relying on QML property
+  // bindings through `var service` (which never re-evaluate sub-property
+  // changes) or `host.requery()` (which would rebuild the palette and
+  // destroy this component mid-countdown).
+  property int _total: 0
+  property int _remaining: 0
+  property real _startedAt: 0
+  property int _tick: 0   // bumped every second → triggers binding re-eval
+
+  readonly property int remaining: _remaining
+  readonly property bool done: _remaining <= 0 && _tick > 0
+  readonly property int totalSeconds: _total
+  readonly property real progress: _total > 0
+    ? Math.max(0, Math.min(1, 1 - _remaining / _total))
+    : 0
+  readonly property bool urgent: _remaining > 0 && _remaining <= 5
 
   function focusInput() {}
   function dismiss() {}
   function beginVoice() {}
   function transcript(text, final) {}
 
-  Component.onCompleted: Qt.callLater(refresh)
-  Connections {
-    target: root.service
-    function onActiveChanged() { root.refresh() }
-  }
-  Timer {
-    interval: 250; repeat: true; running: root.service && root.service.active
-    onTriggered: root.refresh()
-  }
-  function refresh() {
-    if (!root.host || !root.host.opened) return
-    root.host.requery()
+  // Kick off the countdown when the component is first created.  The
+  // service is already active at this point (activate set active=true
+  // before returning provider-view), so we can read its state directly.
+  Component.onCompleted: {
+    if (root.service && root.service.active) {
+      root._total = root.service.activeSeconds
+      root._remaining = root.service.activeSeconds
+      root._startedAt = Date.now()
+      root._tick = 0
+    }
   }
 
+  // Always-running 1-second tick.  With `pragma ComponentBehavior: Bound`
+  // the `running` binding on `root.service.active` (a var sub-property)
+  // never re-evaluates, so we check inside onTriggered instead.
+  Timer {
+    id: countdownTimer
+    interval: 1000
+    repeat: true
+    running: true
+    onTriggered: {
+      // Sync start if the service just became active (covers the case
+      // where the view was created before activate() set active=true).
+      if (root._total === 0 && root.service && root.service.active) {
+        root._total = root.service.activeSeconds
+        root._remaining = root.service.activeSeconds
+        root._startedAt = Date.now()
+        root._tick = 0
+      }
+      if (root._remaining <= 0) return
+      var elapsed = Math.floor((Date.now() - root._startedAt) / 1000)
+      var left = root._total - elapsed
+      root._remaining = Math.max(0, left)
+      root._tick++
+    }
+  }
+
+  // ── pulse animation (last 5 seconds) ──────────────────────────
+  SequentialAnimation on urgentPulseOpacity {
+    running: root.urgent
+    loops: Animation.Infinite
+    NumberAnimation { from: 1.0; to: 0.55; duration: 400; easing.type: Easing.InOutQuad }
+    NumberAnimation { from: 0.55; to: 1.0; duration: 400; easing.type: Easing.InOutQuad }
+  }
+  property real urgentPulseOpacity: 1.0
+
   // A current Keystroke paints the backdrop behind this view, inside the
-  // card border. Filling the card here would cover that border, so only
+  // card border.  Filling the card here would cover that border, so only
   // do it for a host that does not.
   Rectangle {
     anchors.fill: parent
@@ -113,47 +162,114 @@ Item {
       text: root.done
             ? "Input restored"
             : ("Releasing in " + Parser.describeDuration(root.remaining)
-               + (root.service && root.service.activeLabel ? " \u00b7 " + root.service.activeLabel : ""))
+               + (root.windowLabel ? " \u00b7 " + root.windowLabel : ""))
       color: root.muted; font.family: root.fontFamily; font.pixelSize: root.fontLabel
     }
   }
   Rectangle { y: top.y + top.height; width: parent.width; height: 1; color: root.hairline }
 
   // ---------------------------------------------------------------- main
-  Column {
-    x: Style.space(22)
-    y: top.y + top.height + Style.space(28)
-    width: parent.width - x * 2
-    spacing: Style.space(14)
+  // Vertically centred between the header bottom and the progress bar.
+  Item {
+    anchors.top: parent.top
+    anchors.topMargin: top.y + top.height + Style.space(14)
+    anchors.bottom: barWrap.top
+    anchors.left: parent.left; anchors.right: parent.right
+    Column {
+      anchors.centerIn: parent
+      width: parent.width * 0.85
+      spacing: Style.space(14)
 
-    Text {
-      text: root.done ? "\u2713" : Parser.shortDuration(root.remaining)
-      color: root.done ? root.accent : root.foreground
-      font.family: root.fontFamily
-      font.pixelSize: root.fontTitle * 4
-      font.weight: Font.DemiBold
+      Text {
+        opacity: root.urgent ? root.urgentPulseOpacity : 1
+        Behavior on opacity { NumberAnimation { duration: 200 } }
+        text: root.done ? "\u2713" : Parser.shortDuration(root.remaining)
+        color: root.done
+          ? root.accent
+          : (root.urgent ? root.urgentPulseOpacity >= 0.75 ? root.accent : root.foreground : root.foreground)
+        font.family: root.fontFamily
+        font.pixelSize: root.fontTitle * 6
+        font.weight: Font.DemiBold
+        width: parent.width
+        horizontalAlignment: Text.AlignHCenter
+        Behavior on color { ColorAnimation { duration: 200 } }
+      }
+      Text {
+        text: root.done
+              ? "Wipe finished. Keyboard and pointer restored."
+              : "Wipe safely. The keyboard and pointer are blocked until the timer ends."
+        color: root.muted
+        font.family: root.fontFamily
+        font.pixelSize: root.fontLabel
+        width: parent.width
+        horizontalAlignment: Text.AlignHCenter
+      }
     }
-    Text {
-      text: root.done
-            ? "Wipe finished. Keyboard and pointer restored."
-            : "Wipe safely. The keyboard and pointer are blocked until the timer ends."
-      color: root.muted
-      font.family: root.fontFamily
-      font.pixelSize: root.fontLabel
-      wrapMode: Text.WordWrap
-      width: parent.width
+  }
+
+  // ---------------------------------------------------------------- bar
+  Item {
+    id: barWrap
+    x: Style.space(22)
+    y: footerTop.y - Style.space(38)
+    width: parent.width - x * 2
+    height: Style.space(10)
+
+    Rectangle {
+      anchors.fill: parent
+      radius: height / 2
+      color: Util.alpha(root.foreground, 0.08)
+    }
+    Rectangle {
+      anchors.left: parent.left
+      anchors.top: parent.top
+      anchors.bottom: parent.bottom
+      width: parent.width * root.progress
+      radius: height / 2
+      color: root.urgent
+        ? (root.urgentPulseOpacity >= 0.75 ? root.accent : Util.alpha(root.accent, 0.7))
+        : root.accent
+      Behavior on color { ColorAnimation { duration: 200 } }
+      Behavior on width { NumberAnimation { duration: 950; easing.type: Easing.Linear } }
+    }
+    Rectangle {
+      anchors.right: parent.right; anchors.top: parent.top; anchors.bottom: parent.bottom
+      width: Style.space(6); radius: height / 2
+      color: Util.alpha(root.foreground, 0.16)
     }
   }
 
   // ---------------------------------------------------------------- footer
-  Rectangle { y: bottom.y - Style.space(10); width: parent.width; height: 1; color: root.hairline }
-  Row {
-    id: bottom
-    x: Style.space(18); y: parent.height - height - Style.space(16); spacing: Style.space(8); height: Style.space(30)
-    ActionButton { label: "Back to results"; onTriggered: root.host.goBack() }
-    Cap { anchors.verticalCenter: parent.verticalCenter; label: "\u2190"; bright: true }
-    Item { width: Style.space(6); height: 1 }
-    Text { anchors.verticalCenter: parent.verticalCenter; text: "Close"; color: root.muted; font.family: root.fontFamily; font.pixelSize: root.fontLabel }
-    Cap { anchors.verticalCenter: parent.verticalCenter; label: "esc" }
+  Item {
+    id: footerTop
+    x: 0; y: parent.height - Style.space(44); width: parent.width; height: Style.space(44)
+    Rectangle { anchors.top: parent.top; width: parent.width; height: 1; color: root.hairline }
+    Row {
+      anchors.centerIn: parent; spacing: Style.space(16)
+      ActionButton {
+        id: backBtn
+        label: "\u2190"
+        tooltipText: "Back to results"
+        onTriggered: root.host.goBack()
+      }
+      Text {
+        anchors.verticalCenter: parent.verticalCenter
+        text: "Back to results"
+        color: root.muted; font.family: root.fontFamily; font.pixelSize: root.fontLabel
+      }
+      Rectangle { width: 1; height: Style.space(18); color: root.hairline }
+      ActionButton {
+        label: "Close"
+        tooltipText: "Close"
+        onTriggered: root.host.close()
+      }
+      Rectangle { width: 1; height: Style.space(18); color: root.hairline }
+      Text {
+        anchors.verticalCenter: parent.verticalCenter
+        text: "Total"
+        color: root.muted; font.family: root.fontFamily; font.pixelSize: root.fontLabel
+      }
+      Cap { label: Parser.shortDuration(root.totalSeconds) }
+    }
   }
 }

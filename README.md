@@ -11,9 +11,37 @@ Omalaunch extension. The Python helper is shared between them, so a
 half-grabbed input device behaves the same way whichever launcher the
 user came from.
 
+## Before installing: read this
+
+This extension opens `/dev/input/event*` directly. That requires
+membership in the system's `input` group. **A default Omarchy install
+does not put your user in `input`** — the installer does not add it —
+and the first activation on a stock install will fail with a
+notification telling you to run `sudo usermod -aG input $USER` and log
+out.
+
+Membership in `input` means any unprivileged process running as that
+user can read every keystroke on the machine. That is a real security
+trade-off, not a routine setup step. Before you grant it, decide
+whether wiping your keyboard is worth that level of access to the rest
+of your session. See *Leaving the `input` group* below for how to
+revoke it after `omarchy plugin remove`.
+
+This is unrelated to Wayland input handling. Hyprland receives
+devices through logind/libseat and Omarchy runs fine without the
+`input` group. Removing the group later does not break Wayland.
+
 ## Install
 
 Requires Omarchy 4.0.2 or newer with Keystroke enabled as the menu.
+Requires membership in the `input` group (see *Before installing*
+above).
+
+```sh
+# One-time setup if your user is not already in the `input` group.
+# Log out and back in afterwards so the new group is picked up.
+groups | grep -q '^input\b' || sudo usermod -aG input "$USER"
+```
 
 From the palette: open **Extensions** (type `ext`), pick **Keyboard
 Cleaner**, confirm. Or from a terminal:
@@ -82,6 +110,24 @@ Removal unloads the service and deletes the folder under
 left alone; delete the `providers.ozz1ee.keystroke-keyboard-cleaner`
 block by hand if you want them gone.
 
+## Leaving the `input` group
+
+`omarchy plugin remove` does not drop you from the `input` group.
+Removing the plugin only deletes the plugin folder; membership in
+`input` is a system-level fact that outlives the plugin. To revoke
+that access after you no longer need this plugin:
+
+```sh
+sudo gpasswd -d "$USER" input
+# log out and back in for the change to take effect
+```
+
+Hyprland and the rest of Omarchy do not depend on your user being in
+the `input` group, so removing it does not break Wayland input or
+keyboard handling elsewhere. It only stops the kernel from handing
+raw event streams to anything running as your user, which is what
+this plugin needs to grab devices via `EVIOCGRAB`.
+
 ## Limits and dependencies
 
 - The helper blocks every keyboard and pointing device via
@@ -92,9 +138,11 @@ block by hand if you want them gone.
   the notification and the live countdown without spawning a second
   helper. The earlier helper's timer still expires on its own; the
   keyboard releases when the latest timer ends.
-- `input` group membership is required. `omarchy plugin remove` does
-  not drop the user from the group — that is broader than this
-  extension and any Wayland input handling breaks without it.
+- `input` group membership is required to read `/dev/input/event*`.
+  `omarchy plugin remove` does not drop you from the group. Hyprland
+  receives devices through logind/libseat and works fine without
+  the group; nothing in Omarchy breaks if you revoke it after
+  removing this plugin. See *Leaving the `input` group* below.
 - Notifications go through Omarchy's own `omarchy-notification-send`;
   no sudo, no network, no daemons.
 - Like every Omarchy plugin, this one runs unsandboxed inside your
