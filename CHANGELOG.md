@@ -9,7 +9,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 ### Added
 
 - Initial release. Keystroke counterpart to the
-  [`ozz1ee.keyboard-cleaner`](https://github.com/radiohost-cloud/ozz1ee.keyboard-cleaner)
+  [`ozz1ee.keyboard-cleaner`](https://github.com/ozz1ee-dev/ozz1ee.keyboard-cleaner)
   Omalaunch extension. Type `wipe 5m`, `block 30s`, `lock 1h` or `5m`
   in the palette and the cleaning window opens. A live countdown
   panel is available inside the extension's screen; the palette

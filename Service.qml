@@ -146,7 +146,7 @@ Item {
       if (root.helperStatus === -1) {
         return { type: "compound", actions: [
           { type: "notify", glyph: Parser.ICON, headline: "Keyboard Cleaner not installed",
-            body: "The helper script is missing from this plugin bundle. Reinstall with `omarchy plugin remove ozz1ee.keystroke-keyboard-cleaner && omarchy plugin add https://github.com/radiohost-cloud/ozz1ee.keystroke-keyboard-cleaner.git --enable`." },
+            body: "The helper script is missing from this plugin bundle. Reinstall with `omarchy plugin remove ozz1ee.keystroke-keyboard-cleaner && omarchy plugin add https://github.com/ozz1ee-dev/ozz1ee.keystroke-keyboard-cleaner.git --enable`." },
           { type: "close" }
         ]}
       }

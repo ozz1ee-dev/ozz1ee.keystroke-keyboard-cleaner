@@ -6,7 +6,7 @@ be wiped down without triggering anything. Type `wipe 5m`, `block 30s`,
 `lock 1h` or `5m` in the palette and the cleaning window opens.
 
 This is the Keystroke counterpart to the
-[`ozz1ee.keyboard-cleaner`](https://github.com/radiohost-cloud/ozz1ee.keyboard-cleaner)
+[`ozz1ee.keyboard-cleaner`](https://github.com/ozz1ee-dev/ozz1ee.keyboard-cleaner)
 Omalaunch extension. The Python helper is shared between them, so a
 half-grabbed input device behaves the same way whichever launcher the
 user came from.
@@ -47,7 +47,7 @@ From the palette: open **Extensions** (type `ext`), pick **Keyboard
 Cleaner**, confirm. Or from a terminal:
 
 ```sh
-omarchy plugin add https://github.com/radiohost-cloud/ozz1ee.keystroke-keyboard-cleaner.git --enable
+omarchy plugin add https://github.com/ozz1ee-dev/ozz1ee.keystroke-keyboard-cleaner.git --enable
 ```
 
 Extensions installed from the terminal start switched off inside
